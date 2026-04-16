@@ -110,19 +110,41 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(full, header, header_len);
     memcpy(full + header_len, data, len);
 
-    // Step 3: Compute SHA-256 of full object
     compute_hash(full, total, id_out);
 
-    // Step 4: Deduplication — if object already exists, skip writing
     if (object_exists(id_out)) {
         free(full);
         return 0;
     }
 
-    free(full);   // temporary, will write to disk in next commit
-    return -1;    // not complete yet
-}
+    // Step 5: Build file paths
+    char obj_path[512], shard_dir[128], tmp_path[520];
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(id_out, hex);
+    snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
+    object_path(id_out, obj_path, sizeof(obj_path));
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", obj_path);
 
+    // Step 6: Create shard directory
+    mkdir(shard_dir, 0755);
+
+    // Step 7: Write to temp file
+    int fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) { free(full); return -1; }
+    write(fd, full, total);
+    free(full);
+
+    // Step 8: fsync + atomic rename
+    fsync(fd);
+    close(fd);
+    if (rename(tmp_path, obj_path) != 0) return -1;
+
+    // Step 9: fsync the shard directory to persist the rename
+    int dir_fd = open(shard_dir, O_RDONLY);
+    if (dir_fd >= 0) { fsync(dir_fd); close(dir_fd); }
+
+    return 0;
+}
 
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     // TODO: Implement
