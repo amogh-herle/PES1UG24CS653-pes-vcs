@@ -208,7 +208,6 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     c.timestamp = (uint64_t)time(NULL);
     snprintf(c.message, sizeof(c.message), "%s", message);
 
-    // Step 4: Serialize commit struct to text and write to object store
     void *data;
     size_t len;
     if (commit_serialize(&c, &data, &len) != 0) return -1;
@@ -217,5 +216,6 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     free(data);
     if (rc != 0) return -1;
 
-    return -1;
+    // Step 5: Move branch pointer to new commit atomically
+    return head_update(commit_id_out);
 }
