@@ -17,4 +17,5 @@ test_tree
 .vscode/
 .idea/
 
-
+#The text files created during build test
+*.txt
