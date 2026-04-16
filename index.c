@@ -169,9 +169,7 @@ int index_load(Index *index) {
 static int compare_entries(const void *a, const void *b) {
     return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
 }
-
 int index_save(const Index *index) {
-    // Sort a copy by path
     Index sorted = *index;
     qsort(sorted.entries, sorted.count, sizeof(IndexEntry), compare_entries);
 
@@ -193,10 +191,11 @@ int index_save(const Index *index) {
                 e->path);
     }
 
-    fclose(f);          // temporary — fsync added in next commit
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
     return rename(tmp, INDEX_FILE);
 }
-
 // Stage a file for the next commit.
 //
 // HINTS - Useful functions and syscalls:
