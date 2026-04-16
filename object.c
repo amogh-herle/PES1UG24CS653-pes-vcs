@@ -93,6 +93,10 @@ int object_exists(const ObjectID *id) {
 
 //
 // Returns 0 on success, -1 on error.
+// Phase 1: object_write and object_read implementation begins below
+// Utility functions (hash_to_hex, hex_to_hash, compute_hash, object_path, object_exists)
+// are provided above and verified working.
+
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     // TODO: Implement
     (void)type; (void)data; (void)len; (void)id_out;
