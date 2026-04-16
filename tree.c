@@ -143,16 +143,21 @@ static int write_tree_level(IndexEntry *entries, int count,
         const char *slash = strchr(rel, '/');
 
         if (!slash) {
-            // direct file — handle in next commit
+            // Direct file entry in this directory level
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = entries[i].mode;
+            te->hash = entries[i].hash;
+            strncpy(te->name, rel, sizeof(te->name) - 1);
+            te->name[sizeof(te->name) - 1] = '\0';
             i++;
         } else {
-            // subdirectory — handle in commit after
+            // subdirectory — handle in next commit
             i++;
         }
     }
 
     (void)id_out;
-    return -1; 
+    return -1; // not complete yet
 }
 
 int tree_from_index(ObjectID *id_out) {
