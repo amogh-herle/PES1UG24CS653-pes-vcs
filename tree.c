@@ -132,6 +132,29 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 // Returns 0 on success, -1 on error.
 // Forward declaration for object store
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+static int write_tree_level(IndexEntry *entries, int count,
+                              const char *prefix, ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+    int i = 0;
+
+    while (i < count) {
+        const char *rel = entries[i].path + strlen(prefix);
+        const char *slash = strchr(rel, '/');
+
+        if (!slash) {
+            // direct file — handle in next commit
+            i++;
+        } else {
+            // subdirectory — handle in commit after
+            i++;
+        }
+    }
+
+    (void)id_out;
+    return -1; 
+}
+
 int tree_from_index(ObjectID *id_out) {
     // TODO: Implement recursive tree building
     // (See Lab Appendix for logical steps)
