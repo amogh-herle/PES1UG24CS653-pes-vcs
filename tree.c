@@ -143,7 +143,6 @@ static int write_tree_level(IndexEntry *entries, int count,
         const char *slash = strchr(rel, '/');
 
         if (!slash) {
-            // Direct file entry in this directory level
             TreeEntry *te = &tree.entries[tree.count++];
             te->mode = entries[i].mode;
             te->hash = entries[i].hash;
@@ -151,13 +150,40 @@ static int write_tree_level(IndexEntry *entries, int count,
             te->name[sizeof(te->name) - 1] = '\0';
             i++;
         } else {
-            // subdirectory — handle in next commit
-            i++;
+            // Extract subdirectory name
+            size_t dir_len = (size_t)(slash - rel);
+            char dir_name[256];
+            strncpy(dir_name, rel, dir_len);
+            dir_name[dir_len] = '\0';
+
+            // Build prefix for recursion e.g. "src/"
+            char sub_prefix[512];
+            snprintf(sub_prefix, sizeof(sub_prefix), "%s%s/", prefix, dir_name);
+
+            // Collect all entries belonging to this subdir
+            int j = i;
+            while (j < count &&
+                   strncmp(entries[j].path + strlen(prefix), dir_name, dir_len) == 0 &&
+                   entries[j].path[strlen(prefix) + dir_len] == '/') {
+                j++;
+            }
+
+            // Recurse into subdirectory
+            ObjectID sub_id;
+            if (write_tree_level(entries + i, j - i, sub_prefix, &sub_id) != 0)
+                return -1;
+
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = 0040000;
+            te->hash = sub_id;
+            strncpy(te->name, dir_name, sizeof(te->name) - 1);
+            te->name[sizeof(te->name) - 1] = '\0';
+            i = j;
         }
     }
 
     (void)id_out;
-    return -1; // not complete yet
+    return -1; 
 }
 
 int tree_from_index(ObjectID *id_out) {
