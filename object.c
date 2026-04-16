@@ -101,19 +101,25 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     const char *type_str = (type == OBJ_BLOB) ? "blob" :
                            (type == OBJ_TREE) ? "tree" : "commit";
 
-    // Step 1: Build header string e.g. "blob 16\0"
     char header[64];
     int header_len = snprintf(header, sizeof(header), "%s %zu", type_str, len) + 1;
 
-    // Step 2: Combine header + data into one buffer
     size_t total = (size_t)header_len + len;
     uint8_t *full = malloc(total);
     if (!full) return -1;
     memcpy(full, header, header_len);
     memcpy(full + header_len, data, len);
 
-    free(full);   // temporary, will use in next commit
-    (void)id_out;
+    // Step 3: Compute SHA-256 of full object
+    compute_hash(full, total, id_out);
+
+    // Step 4: Deduplication — if object already exists, skip writing
+    if (object_exists(id_out)) {
+        free(full);
+        return 0;
+    }
+
+    free(full);   // temporary, will write to disk in next commit
     return -1;    // not complete yet
 }
 
