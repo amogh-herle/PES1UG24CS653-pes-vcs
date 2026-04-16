@@ -150,17 +150,14 @@ static int write_tree_level(IndexEntry *entries, int count,
             te->name[sizeof(te->name) - 1] = '\0';
             i++;
         } else {
-            // Extract subdirectory name
             size_t dir_len = (size_t)(slash - rel);
             char dir_name[256];
             strncpy(dir_name, rel, dir_len);
             dir_name[dir_len] = '\0';
 
-            // Build prefix for recursion e.g. "src/"
             char sub_prefix[512];
             snprintf(sub_prefix, sizeof(sub_prefix), "%s%s/", prefix, dir_name);
 
-            // Collect all entries belonging to this subdir
             int j = i;
             while (j < count &&
                    strncmp(entries[j].path + strlen(prefix), dir_name, dir_len) == 0 &&
@@ -168,7 +165,6 @@ static int write_tree_level(IndexEntry *entries, int count,
                 j++;
             }
 
-            // Recurse into subdirectory
             ObjectID sub_id;
             if (write_tree_level(entries + i, j - i, sub_prefix, &sub_id) != 0)
                 return -1;
@@ -182,13 +178,18 @@ static int write_tree_level(IndexEntry *entries, int count,
         }
     }
 
-    (void)id_out;
-    return -1; 
+    // Serialize tree and write to object store
+    void *data;
+    size_t len;
+    if (tree_serialize(&tree, &data, &len) != 0) return -1;
+    int rc = object_write(OBJ_TREE, data, len, id_out);
+    free(data);
+    return rc;
 }
 
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    Index index;
+    if (index_load(&index) != 0) return -1;
+    if (index.count == 0) return -1;
+    return write_tree_level(index.entries, index.count, "", id_out);
 }
