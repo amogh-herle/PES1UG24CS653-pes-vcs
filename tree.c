@@ -131,40 +131,47 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 // Forward declaration for object store
+// Forward declarations
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
 static int write_tree_level(IndexEntry *entries, int count,
-                              const char *prefix, ObjectID *id_out) {
+                             const char *prefix, ObjectID *id_out) {
     Tree tree;
     tree.count = 0;
     int i = 0;
 
     while (i < count) {
+        // Strip the prefix from the path
         const char *rel = entries[i].path + strlen(prefix);
         const char *slash = strchr(rel, '/');
 
         if (!slash) {
+            // It's a direct file entry
             TreeEntry *te = &tree.entries[tree.count++];
             te->mode = entries[i].mode;
             te->hash = entries[i].hash;
             strncpy(te->name, rel, sizeof(te->name) - 1);
-            te->name[sizeof(te->name) - 1] = '\0';
             i++;
         } else {
+            // It's a subdirectory — collect all entries with this prefix
             size_t dir_len = (size_t)(slash - rel);
             char dir_name[256];
             strncpy(dir_name, rel, dir_len);
             dir_name[dir_len] = '\0';
 
+            // New prefix for recursion
             char sub_prefix[512];
             snprintf(sub_prefix, sizeof(sub_prefix), "%s%s/", prefix, dir_name);
 
+            // Count how many entries belong to this subdir
             int j = i;
-            while (j < count &&
-                   strncmp(entries[j].path + strlen(prefix), dir_name, dir_len) == 0 &&
+            while (j < count && strncmp(entries[j].path + strlen(prefix),
+                                         dir_name, dir_len) == 0 &&
                    entries[j].path[strlen(prefix) + dir_len] == '/') {
                 j++;
             }
 
+            // Recurse
             ObjectID sub_id;
             if (write_tree_level(entries + i, j - i, sub_prefix, &sub_id) != 0)
                 return -1;
@@ -173,12 +180,10 @@ static int write_tree_level(IndexEntry *entries, int count,
             te->mode = 0040000;
             te->hash = sub_id;
             strncpy(te->name, dir_name, sizeof(te->name) - 1);
-            te->name[sizeof(te->name) - 1] = '\0';
             i = j;
         }
     }
 
-    // Serialize tree and write to object store
     void *data;
     size_t len;
     if (tree_serialize(&tree, &data, &len) != 0) return -1;
