@@ -10,12 +10,15 @@
 //   "100644 hello.txt\0" followed by 32 raw bytes of SHA-256
 
 #include "tree.h"
+#include "index.h"
+#include "pes.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include "index.h"
+
+extern int object_write(ObjectType type,const void *data,size_t len,ObjectID *id_out);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -130,71 +133,121 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
-// Forward declaration for object store
-// Forward declarations
-int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+typedef struct {
+    uint32_t mode;
+    ObjectID hash;
+    char path[256];
+} TempEntry;
 
-static int write_tree_level(IndexEntry *entries, int count,
-                             const char *prefix, ObjectID *id_out) {
+static int build_tree_level(TempEntry *entries, int count, const char *prefix, ObjectID *id_out)
+{
     Tree tree;
     tree.count = 0;
-    int i = 0;
+    for (int i = 0; i < count; i++) {
 
-    while (i < count) {
-        // Strip the prefix from the path
-        const char *rel = entries[i].path + strlen(prefix);
-        const char *slash = strchr(rel, '/');
+        const char *rel = entries[i].path;
 
-        if (!slash) {
-            // It's a direct file entry
-            TreeEntry *te = &tree.entries[tree.count++];
-            te->mode = entries[i].mode;
-            te->hash = entries[i].hash;
-            strncpy(te->name, rel, sizeof(te->name) - 1);
-            i++;
-        } else {
-            // It's a subdirectory — collect all entries with this prefix
-            size_t dir_len = (size_t)(slash - rel);
-            char dir_name[256];
-            strncpy(dir_name, rel, dir_len);
-            dir_name[dir_len] = '\0';
+        if (prefix && strncmp(rel, prefix, strlen(prefix)) != 0)
+            continue;
 
-            // New prefix for recursion
-            char sub_prefix[512];
-            snprintf(sub_prefix, sizeof(sub_prefix), "%s%s/", prefix, dir_name);
+        const char *name = prefix ? rel + strlen(prefix) : rel;
 
-            // Count how many entries belong to this subdir
-            int j = i;
-            while (j < count && strncmp(entries[j].path + strlen(prefix),
-                                         dir_name, dir_len) == 0 &&
-                   entries[j].path[strlen(prefix) + dir_len] == '/') {
-                j++;
-            }
+        if (strchr(name, '/') != NULL)
+            continue;
 
-            // Recurse
-            ObjectID sub_id;
-            if (write_tree_level(entries + i, j - i, sub_prefix, &sub_id) != 0)
-                return -1;
+        TreeEntry *t = &tree.entries[tree.count++];
 
-            TreeEntry *te = &tree.entries[tree.count++];
-            te->mode = 0040000;
-            te->hash = sub_id;
-            strncpy(te->name, dir_name, sizeof(te->name) - 1);
-            i = j;
-        }
+        t->mode = entries[i].mode;
+        strcpy(t->name, name);
+        t->hash = entries[i].hash;
     }
+    for (int i = 0; i < count; i++) {
 
+        const char *rel = entries[i].path;
+
+        if (prefix && strncmp(rel, prefix, strlen(prefix)) != 0)
+            continue;
+
+        const char *name = prefix ? rel + strlen(prefix) : rel;
+
+        char *slash = strchr(name, '/');
+        if (!slash)
+            continue;
+
+        char dirname[256];
+        strncpy(dirname, name, slash - name);
+        dirname[slash - name] = '\0';
+
+        int exists = 0;
+        for (int j = 0; j < tree.count; j++)
+            if (strcmp(tree.entries[j].name, dirname) == 0)
+                exists = 1;
+
+        if (exists)
+            continue;
+
+        char new_prefix[256];
+    if (snprintf(new_prefix,
+                sizeof(new_prefix),
+                "%s%s/",
+                prefix ? prefix : "",
+                dirname) >= (int)sizeof(new_prefix)) {
+        return -1;
+    }
+new_prefix[sizeof(new_prefix) - 1] = '\0';
+
+        ObjectID sub_id;
+
+        if (build_tree_level(entries, count,
+                            new_prefix,
+                            &sub_id) != 0)
+            return -1;
+
+        TreeEntry *t = &tree.entries[tree.count++];
+
+        t->mode = MODE_DIR;
+        strcpy(t->name, dirname);
+        t->hash = sub_id;
+    }
     void *data;
     size_t len;
-    if (tree_serialize(&tree, &data, &len) != 0) return -1;
-    int rc = object_write(OBJ_TREE, data, len, id_out);
+
+    if (tree_serialize(&tree, &data, &len) != 0)
+        return -1;
+
+    if (object_write(OBJ_TREE, data, len, id_out) != 0) {
+        free(data);
+        return -1;
+    }
+
     free(data);
-    return rc;
+    return 0;
 }
 
 int tree_from_index(ObjectID *id_out) {
-    Index index;
-    if (index_load(&index) != 0) return -1;
-    if (index.count == 0) return -1;
-    return write_tree_level(index.entries, index.count, "", id_out);
+    FILE *fp = fopen(".pes/index", "r");
+    if (!fp) return -1;
+
+    TempEntry entries[256];
+    int count = 0;
+
+    while (!feof(fp)) {
+        char hash_hex[HASH_HEX_SIZE + 1];
+        long mtime;
+        size_t size;
+
+        if (fscanf(fp, "%o %64s %ld %zu %255s\n",
+                &entries[count].mode,
+                hash_hex,
+                &mtime,
+                &size,
+                entries[count].path) == 5) {
+
+            hex_to_hash(hash_hex, &entries[count].hash);
+            count++;
+        }
+    }
+
+    fclose(fp);
+    return build_tree_level(entries, count, NULL, id_out);
 }
